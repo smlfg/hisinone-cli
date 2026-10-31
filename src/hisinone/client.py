@@ -222,7 +222,7 @@ class HisinoneClient:
 
     def search(self, begriff: str) -> list[parse.Treffer]:
         maske = self._expect_ok(self.request("GET", SEARCH_GET))
-        form = parse.parse_formular(maske.text)
+        form = parse.parse_suchformular(maske.text)
         if form is None:
             raise HisinoneError(
                 "Suchformular nicht gefunden.",
@@ -235,11 +235,27 @@ class HisinoneClient:
                 "Portal-Adresse prüfen oder hisinone suche erneut versuchen",
             )
         action = form.action or SEARCH_GET
+        data = form.payload({field: begriff})
+        button = next(
+            (item for item in form.submit_fields if item[1].casefold() == "suchen"),
+            None,
+        )
+        if button is None:
+            button = next(
+                (
+                    item
+                    for item in form.submit_fields
+                    if "search" in item[0].casefold() and item[1].strip()
+                ),
+                None,
+            )
+        if button is not None:
+            data.append(button)
         response = self._expect_ok(
             self.request(
                 form.method.upper() or "POST",
                 action,
-                data=form.payload({field: begriff}),
+                data=data,
                 referer=maske.url,
             )
         )

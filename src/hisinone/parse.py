@@ -106,7 +106,7 @@ class _PageParser(HTMLParser):
         self.tables: list[dict[str, object]] = []
         self._h1_depth = 0
         self._table: dict[str, object] | None = None
-        self._nested_tables = 0
+        self._table_stack: list[dict[str, object]] = []
         self._row: list[dict[str, object]] | None = None
         self._cell: list[str] | None = None
         self._cell_tag = "td"
@@ -120,12 +120,24 @@ class _PageParser(HTMLParser):
             self._h1_depth += 1
             return
         if tag == "table":
-            if self._table is None:
-                classes = set(values.get("class", "").split())
-                self._table = {"classes": classes, "rows": []}
-                self._nested_tables = 0
-            else:
-                self._nested_tables += 1
+            if self._table is not None:
+                self._table_stack.append(
+                    {
+                        "table": self._table,
+                        "row": self._row,
+                        "cell": self._cell,
+                        "cell_tag": self._cell_tag,
+                        "cell_links": self._cell_links,
+                        "link_href": self._link_href,
+                        "link_text": self._link_text,
+                    }
+                )
+                self._row = None
+                self._cell = None
+                self._link_href = None
+                self._link_text = []
+            classes = set(values.get("class", "").split())
+            self._table = {"classes": classes, "rows": []}
             return
         if self._table is None:
             return
@@ -150,11 +162,20 @@ class _PageParser(HTMLParser):
         if tag == "table":
             if self._table is None:
                 return
-            if self._nested_tables:
-                self._nested_tables -= 1
+            self.tables.append(self._table)
+            if self._table_stack:
+                state = self._table_stack.pop()
+                self._table = state["table"]  # type: ignore[assignment]
+                self._row = state["row"]  # type: ignore[assignment]
+                self._cell = state["cell"]  # type: ignore[assignment]
+                self._cell_tag = str(state["cell_tag"])
+                self._cell_links = state["cell_links"]  # type: ignore[assignment]
+                self._link_href = state["link_href"]  # type: ignore[assignment]
+                self._link_text = state["link_text"]  # type: ignore[assignment]
             else:
-                self.tables.append(self._table)
                 self._table = None
+                self._row = None
+                self._cell = None
             return
         if self._table is None:
             return
@@ -179,7 +200,7 @@ class _PageParser(HTMLParser):
             self._cell_links = []
             return
         if tag == "tr" and self._row is not None:
-            if self._table is not None and self._nested_tables == 0:
+            if self._table is not None:
                 rows = self._table["rows"]
                 assert isinstance(rows, list)
                 rows.append(self._row)
@@ -227,30 +248,106 @@ def _cell_links(row: list[dict[str, object]], index: int) -> list[tuple[str, str
     return [(str(href), str(text)) for href, text in links]
 
 
+def _normalize_header(text: str) -> str:
+    text = clean(text)
+    text = re.sub(r"\s*\[[^\]]*\]\s*$", "", text)
+    return text.casefold()
+
+
+def _header_row(rows: list[list[dict[str, object]]]) -> tuple[int, list[str]]:
+    for index, row in enumerate(rows):
+        if row and all(cell.get("tag") == "th" for cell in row):
+            return index, [_normalize_header(str(cell.get("text", ""))) for cell in row]
+    return -1, []
+
+
+def _column(headers: list[str], *needles: str) -> int | None:
+    for index, header in enumerate(headers):
+        if any(needle in header for needle in needles):
+            return index
+    return None
+
+
+def _first_text(row: list[dict[str, object]], indices: list[int]) -> str:
+    for index in indices:
+        value = _cell_text(row, index).strip()
+        if value:
+            return value
+    return ""
+
+
+def _row_ids(row: list[dict[str, object]]) -> tuple[int | None, int | None]:
+    unit_id: int | None = None
+    period_id: int | None = None
+    for cell in row:
+        links = cell.get("links")
+        if not isinstance(links, list):
+            continue
+        for href, _ in links:
+            href = str(href)
+            unit_match = UNIT_ID_RE.search(href)
+            period_match = PERIOD_ID_RE.search(href)
+            if unit_match and unit_id is None:
+                unit_id = int(unit_match.group(1))
+            if period_match and period_id is None:
+                period_id = int(period_match.group(1))
+    return unit_id, period_id
+
+
 def parse_suche(html: str) -> list[Treffer]:
     parser = _parse_page(html)
     treffer: list[Treffer] = []
-    for row in _table_rows(parser, "searchResults"):
-        if not row or row[0].get("tag") == "th":
+    title_priority = (
+        "semesterabhängiger titel",
+        "bezeichnung",
+        "semesterunabhängiger titel",
+        "titel",
+    )
+    for table in parser.tables:
+        rows = table.get("rows")
+        if not isinstance(rows, list):
             continue
-        links = _cell_links(row, 0)
-        titel = links[0][1] if links else _cell_text(row, 0)
-        if not titel:
+        header_index, headers = _header_row(rows)
+        if header_index < 0:
             continue
-        href = links[0][0] if links else ""
-        unit_match = UNIT_ID_RE.search(href)
-        period_match = PERIOD_ID_RE.search(href)
-        treffer.append(
-            Treffer(
-                nummer=len(treffer) + 1,
-                titel=titel,
-                art=_cell_text(row, 1),
-                unit_id=int(unit_match.group(1)) if unit_match else None,
-                semester=_cell_text(row, 3),
-                lehrperson=_cell_text(row, 2),
-                period_id=int(period_match.group(1)) if period_match else None,
-            )
+        title_indices = [
+            headers.index(name) for name in title_priority if name in headers
+        ]
+        if not title_indices:
+            continue
+        art_index = _column(headers, "veranstaltungsart", "art")
+        semester_index = (
+            headers.index("semester") if "semester" in headers else _column(headers, "semester")
         )
+        lehr_indices = [
+            index
+            for index, header in enumerate(headers)
+            if "verantwortliche" in header or "durchführende" in header
+        ]
+        for row in rows[header_index + 1 :]:
+            if not row or row[0].get("tag") == "th":
+                continue
+            titel = _first_text(row, title_indices)
+            if not titel:
+                continue
+            unit_id, period_id = _row_ids(row)
+            treffer.append(
+                Treffer(
+                    nummer=len(treffer) + 1,
+                    titel=titel,
+                    art=_cell_text(row, art_index) if art_index is not None else "",
+                    unit_id=unit_id,
+                    semester=(
+                        _cell_text(row, semester_index)
+                        if semester_index is not None
+                        else ""
+                    ),
+                    lehrperson=_first_text(row, lehr_indices),
+                    period_id=period_id,
+                )
+            )
+        if treffer:
+            return treffer
     return treffer
 
 
@@ -261,6 +358,96 @@ def _parse_zeitraum(text: str) -> tuple[str, str]:
     return text.strip(), ""
 
 
+LABEL_FIELD_RE = re.compile(
+    r'<div class="labelItemLine">\s*<label[^>]*>(.*?)</label>\s*'
+    r'<div[^>]*class="answer[^"]*"[^>]*>(.*?)</div>',
+    re.S | re.I,
+)
+
+
+def _strip_tags(text: str) -> str:
+    return clean(re.sub(r"<[^>]+>", " ", text))
+
+
+def _label_fields(html: str) -> dict[str, str]:
+    felder: dict[str, str] = {}
+    for match in LABEL_FIELD_RE.finditer(html):
+        key = _strip_tags(match.group(1))
+        if key and key not in felder:
+            felder[key] = _strip_tags(match.group(2))
+    return felder
+
+
+def _selected_semester(html: str) -> str:
+    select = re.search(
+        r'<select[^>]*(?:termPeriodDropDownList|termSelect)[^>]*>(.*?)</select>',
+        html,
+        re.S | re.I,
+    )
+    if select:
+        option = re.search(
+            r"<option[^>]*selected[^>]*>(.*?)</option>", select.group(1), re.S | re.I
+        )
+        if option:
+            return _strip_tags(option.group(1))
+    return ""
+
+
+def _parse_termine(parser: _PageParser) -> list[Termin]:
+    termine: list[Termin] = []
+    for table in parser.tables:
+        rows = table.get("rows")
+        if not isinstance(rows, list):
+            continue
+        header_index, headers = _header_row(rows)
+        if header_index < 0:
+            continue
+        wochentag_index = _column(headers, "wochentag")
+        raum_index = _column(headers, "raum")
+        if wochentag_index is None and raum_index is None:
+            continue
+        rhythmus_index = _column(headers, "rhythmus")
+        von_bis_index = _column(headers, "von - bis", "von-bis")
+        start_index = _column(headers, "startdatum")
+        for row in rows[header_index + 1 :]:
+            if not row or row[0].get("tag") == "th":
+                continue
+            von, bis = (
+                _parse_zeitraum(_cell_text(row, von_bis_index))
+                if von_bis_index is not None
+                else ("", "")
+            )
+            start, ende = (
+                _parse_zeitraum(_cell_text(row, start_index))
+                if start_index is not None
+                else ("", "")
+            )
+            termine.append(
+                Termin(
+                    rhythmus=(
+                        _cell_text(row, rhythmus_index)
+                        if rhythmus_index is not None
+                        else ""
+                    ),
+                    wochentag=(
+                        _cell_text(row, wochentag_index)
+                        if wochentag_index is not None
+                        else ""
+                    ),
+                    von=von,
+                    bis=bis,
+                    start=start,
+                    ende=ende,
+                    raum=(
+                        _cell_text(row, raum_index) if raum_index is not None else ""
+                    ),
+                )
+            )
+        if termine:
+            return termine
+    return termine
+
+
 def parse_veranstaltung(html: str) -> Veranstaltung:
     parser = _parse_page(html)
     felder: dict[str, str] = {}
@@ -269,38 +456,30 @@ def parse_veranstaltung(html: str) -> Veranstaltung:
             key = _cell_text(row, 0)
             if key:
                 felder[key] = _cell_text(row, 1)
+    for key, value in _label_fields(html).items():
+        if value and not felder.get(key):
+            felder[key] = value
 
     unit_raw = felder.get("Veranstaltungsnummer", "")
     unit_match = re.search(r"\d+", unit_raw)
+    if unit_match:
+        unit_id: int | None = int(unit_match.group(0))
+    else:
+        id_match = UNIT_ID_RE.search(html)
+        unit_id = int(id_match.group(1)) if id_match else None
     veranstaltung = Veranstaltung(
         titel=felder.get("Titel", ""),
         art=felder.get("Veranstaltungsart", ""),
-        semester=felder.get("Semester", ""),
+        semester=felder.get("Semester", "") or _selected_semester(html),
         lehrperson=(
             felder.get("Verantwortliche/r")
             or felder.get("Durchführende/r")
             or felder.get("Verantwortliche")
             or ""
         ),
-        unit_id=int(unit_match.group(0)) if unit_match else None,
+        unit_id=unit_id,
     )
-
-    for row in _table_rows(parser, "termine"):
-        if not row or _cell_text(row, 0).lower() == "rhythmus":
-            continue
-        von, bis = _parse_zeitraum(_cell_text(row, 2))
-        start, ende = _parse_zeitraum(_cell_text(row, 3))
-        veranstaltung.termine.append(
-            Termin(
-                rhythmus=_cell_text(row, 0),
-                wochentag=_cell_text(row, 1),
-                von=von,
-                bis=bis,
-                start=start,
-                ende=ende,
-                raum=_cell_text(row, 4),
-            )
-        )
+    veranstaltung.termine.extend(_parse_termine(parser))
     return veranstaltung
 
 
@@ -345,9 +524,12 @@ def parse_noten(html: str) -> list[Leistung]:
 class Formular:
     action: str = ""
     method: str = "get"
+    name: str = ""
+    element_id: str = ""
     fields: list[tuple[str, str]] = field(default_factory=list)
     text_fields: list[str] = field(default_factory=list)
     password_fields: list[str] = field(default_factory=list)
+    submit_fields: list[tuple[str, str]] = field(default_factory=list)
 
     def payload(self, overrides: dict[str, str]) -> list[tuple[str, str]]:
         return [(name, overrides.get(name, value)) for name, value in self.fields]
@@ -373,9 +555,16 @@ class _FormParser(HTMLParser):
             self._form = Formular(
                 action=values.get("action", ""),
                 method=values.get("method", "get").lower(),
+                name=values.get("name", ""),
+                element_id=values.get("id", ""),
             )
             return
         if self._form is None:
+            return
+        if tag == "button":
+            name = values.get("name", "")
+            if name and values.get("type", "").lower() == "submit":
+                self._form.submit_fields.append((name, values.get("value", "")))
             return
         if tag == "input":
             name = values.get("name", "")
@@ -455,16 +644,51 @@ class _FormParser(HTMLParser):
             self._textarea_text.append(data)
 
 
-def parse_formular(html: str) -> Formular | None:
+def _forms(html: str) -> list[Formular]:
     parser = _FormParser()
     parser.feed(html)
     parser.close()
-    if not parser.forms:
+    return parser.forms
+
+
+def parse_formular(html: str) -> Formular | None:
+    forms = _forms(html)
+    if not forms:
         return None
-    for form in parser.forms:
+    for form in forms:
         if form.password_fields or form.text_fields:
             return form
-    return parser.forms[0]
+    return forms[0]
+
+
+def parse_suchformular(html: str) -> Formular | None:
+    """Wählt das öffentliche Suchformular, nicht das Login-Formular im Kopf."""
+    candidates = [
+        form
+        for form in _forms(html)
+        if form.text_fields and not form.password_fields
+    ]
+    if not candidates:
+        return None
+
+    def score(form: Formular) -> int:
+        identity = f"{form.element_id} {form.name} {form.action}".casefold()
+        text = " ".join(form.text_fields).casefold()
+        buttons = " ".join(name for name, _ in form.submit_fields).casefold()
+        value = 0
+        if "search" in identity:
+            value += 6
+        if "genericsearchmask" in identity:
+            value += 4
+        if "search" in text:
+            value += 2
+        if "search" in buttons or any(
+            wert.casefold() == "suchen" for _, wert in form.submit_fields
+        ):
+            value += 2
+        return value
+
+    return max(candidates, key=score)
 
 
 def parse_login_benutzer(html: str) -> str:
