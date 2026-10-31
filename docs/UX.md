@@ -1,39 +1,47 @@
-# UX-Spec: kurstool
+# UX-Spec: hisinone
 
-Diese Datei ist die Vorlage für `docs/UX.md` in jedem neuen Repo. Sie wird vor der ersten Codezeile ausgefüllt. Alle Befehle sind so abtippbar, wie ein Mensch sie im Terminal eingibt. Beispielwerte (Tool `kurstool`, Kursnummern, Mails auf `.invalid`) werden durch die echten Werte des Projekts ersetzt.
+`hisinone` macht HISinOne-Campusportale im Terminal nutzbar. Das öffentliche
+Vorlesungsverzeichnis (Suche und Veranstaltungsdetails) funktioniert ohne
+Login. Stundenplan und Leistungsübersicht brauchen eine angemeldete Sitzung.
 
-Ablauf beim Ausfüllen:
-
-1. Website live öffnen und die drei wichtigsten Aufgaben eines Menschen heraussuchen.
-2. Jede Aufgabe als Sitzung mitschreiben: Befehl, Eingabe, erwartete Ausgabe.
-3. Lesende Routen und alle Formularschritte der schreibenden Aktion ergänzen.
-4. Fixtures unter `tests/fixtures/ux/` ablegen.
-5. `python tests/harness/ux_check.py --spec-only` laufen lassen; erst bei grünem UX01 weiterbauen.
+Erkundet wurde die Instanz der Universität Freiburg:
+`https://campus.uni-freiburg.de/qisserver/pages/cs/sys/portal/hisinoneStartPage.faces`.
+Die Live-Erkundung erfolgte ausschließlich lesend per GET; die Notizen und
+Rohantworten liegen unter `scratch/live/`. Die Suche ist ein JSF-Formular und
+wird per POST abgeschickt. Dieser POST wurde bei der Erkundung nicht an den
+echten Server gesendet. Die Trefferliste in
+`tests/fixtures/ux/suche_oberseminar.html` ist deshalb aus den live geladenen
+Katalog- und Detailseiten zusammengesetzt und im Fixture als solche markiert.
+Antworten von Login-Seiten (Login-Erfolg, Stundenplan, Noten) sind synthetisch
+und ebenfalls im Fixture markiert.
 
 ## Meta
 
-Das Meta-Objekt benennt den Befehlsnamen im PATH, den Installationsbefehl und alle Umgebungsvariablen. `base_url_env` ist Pflicht, sobald es Routen oder Formsteps gibt. `credential_env` führt dazu, dass das Tool einen `login`-Befehl haben muss.
-
 ```ux-meta
-{"tool": "kurstool",
- "install": "pipx install git+https://github.com/smlfg/kurstool-cli",
- "base_url_env": "KURSTOOL_BASE_URL",
- "env": {"KURSTOOL_STATUSGRUPPE": "studierende"},
- "credential_env": ["KURSTOOL_LOGIN_USER", "KURSTOOL_LOGIN_PASSWORD"]}
+{"tool": "hisinone",
+ "install": "pipx install git+https://github.com/smlfg/hisinone-cli",
+ "base_url_env": "HISINONE_BASE_URL",
+ "env": {"HISINONE_HEUTE": "2026-10-31"},
+ "credential_env": ["HISINONE_USER", "HISINONE_PASSWORD"]}
 ```
+
+`HISINONE_BASE_URL` überschreibt die Portal-Adresse (für den Fake-Server in den
+Tests). `HISINONE_HEUTE` setzt das Bezugsdatum für `stundenplan --woche` und
+dient nur deterministischen Tests; im Alltag gilt das heutige Datum.
 
 ## Sitzungen
 
-Jede Sitzung ist eine Nutzer-Aufgabe. Es müssen mindestens drei sein, darunter Login, Suche per Name und eine schreibende Aktion. `$` ist ein Befehl, `>` eine Eingabe, `<` eine erwartete Ausgabe und `!` der erwartete Exit-Code. Der Installationsbefehl wird von der Harness durch eine lokale Installation in ein frisches venv ersetzt.
-
 ### Installation und Login
 
-Der Login fragt im Terminal interaktiv nach Benutzer und Passwort. Das Passwort wird nicht angezeigt und nicht gespeichert; die Sitzung landet im Schlüsselbund oder in einer Datei mit Rechten 0600. Die Zugangsdaten stammen aus einem Testkonto, nie aus echten Daten.
+Beim ersten Start fragt `login` nach Portal-Adresse oder Hochschulname,
+Benutzername und Passwort. Das Passwort wird verdeckt eingegeben und nicht
+gespeichert. Die Sitzung liegt in `~/.config/hisinone-cli/` mit Rechten 0600.
+Ist `HISINONE_BASE_URL` gesetzt, entfällt die Portal-Frage. Die Zugangsdaten
+im Beispiel sind erfunden.
 
 ```ux-session
-$ pipx install git+https://github.com/smlfg/kurstool-cli
-< kurstool
-$ kurstool login
+$ pipx install git+https://github.com/smlfg/hisinone-cli
+$ hisinone login
 < Benutzer:
 > max.mustermann@example.invalid
 < Passwort:
@@ -42,51 +50,85 @@ $ kurstool login
 ! exit 0
 ```
 
-### Kurse nach Namen suchen
+### Veranstaltungen nach Namen suchen
 
-Der Suchbegriff ist positional. Die Ausgabe zeigt Namen und Kursnummer, damit ein Mensch ohne Nachschlagen weiterarbeiten kann.
+Der Suchbegriff ist positional und wird gegen Titel, Nummer und Lehrperson
+gesucht. Die Treffer sind nummeriert; die Ausgabe nennt Titel, Veranstaltungsart
+und die Unit-ID, damit `veranstaltung` direkt damit weiterarbeiten kann.
 
 ```ux-session
-$ kurstool search volleyball
-< 1) Volleyball Anfänger (Kurs 32304)
-< 2) Volleyball Fortgeschritten (Kurs 32305)
+$ hisinone suche Oberseminar
+< 1) Oberseminar am Lehrstuhl Mustererkennung und Bildverarbeitung (Veranstaltung 7586)
+< 2) Oberseminar am Lehrstuhl Programmiersprachen (Veranstaltung 7578)
+< 3) Oberseminar am Lehrstuhl Rechnernetze und Telematik (Veranstaltung 7589)
 ! exit 0
 ```
 
-### Kurs verbindlich buchen
+### Veranstaltungsdetails anzeigen
 
-Die schreibende Aktion zeigt zuerst Kurs, Ort und Preis. Danach fragt sie mit Default Nein. Erst nach `j` werden alle Formularschritte bis zur endgültigen Bestätigung gesendet. Bei `N` endet der Befehl ohne Request an einen Schritt ohne `before_confirm`.
+`veranstaltung` nimmt den Namen positional. Bei mehreren Treffern fragt das
+Tool im Terminal nummeriert nach; der Name wird nicht als ID verlangt. Die
+Detailansicht zeigt Titel, Art, Semester, Lehrperson, Termin und Raum.
 
 ```ux-session
-$ kurstool book "Volleyball Anfänger"
-< Kurs: Volleyball Anfänger (32304)
-< Ort: Sporthalle Nord
-< Preis: 25,00 EUR
-< Buchung verbindlich? [j/N]
-> j
-< Buchung bestätigt
-< Bestätigungsnummer: KB-2026-0042
+$ hisinone veranstaltung "Oberseminar am Lehrstuhl Mustererkennung und Bildverarbeitung"
+< Titel: Oberseminar am Lehrstuhl Mustererkennung und Bildverarbeitung
+< Art: Seminar
+< Semester: Wintersemester 2026/2027
+< Lehrperson: Prof. Dr. A. Beispiel
+< Termin: Di 16:00-18:00, 20.10.2026-09.02.2027
+< Raum: SR 02 017 (G.-Köhler-Allee 052)
+! exit 0
+```
+
+### Stundenplan der Woche
+
+`stundenplan --woche` braucht eine gespeicherte Login-Sitzung. Ohne Sitzung
+nennt der Fehler den nächsten Schritt: `hisinone login`. Das Bezugsdatum kommt
+aus `HISINONE_HEUTE`, sonst aus dem heutigen Tag.
+
+```ux-session
+$ hisinone stundenplan --woche
+< Stundenplan KW 44 (26.10.2026 - 01.11.2026)
+< Mo 10:00-12:00 Algorithmen und Datenstrukturen (HS 101)
+< Di 16:00-18:00 Oberseminar am Lehrstuhl Mustererkennung und Bildverarbeitung (SR 02 017)
+! exit 0
+```
+
+### Leistungsübersicht
+
+`noten` zeigt die Leistungen der angemeldeten Person. Auch hier gilt: ohne
+Login verweist die Fehlermeldung auf `hisinone login`.
+
+```ux-session
+$ hisinone noten
+< Leistungsübersicht
+< Algorithmen und Datenstrukturen: 1,7 (bestanden)
+< Programmiersprachen: 2,3 (bestanden)
 ! exit 0
 ```
 
 ## Lesende Routen
 
-Hier stehen alle Routen, die die Sitzungen gegen den Fake-Server brauchen. `path` wird ohne Querystring exakt verglichen; `query_contains` ist optional. Der Login ist ein POST, löst aber keine Buchung aus und gehört deshalb zu den lesenden Routen. Die Antwortdateien liegen relativ zum Repo.
+Die Routen bilden alle Requests der Sitzungen gegen den Fake-Server ab. Die
+öffentliche Suche ist ein POST auf das JSF-Formular; sie ist lesend und löst
+keine schreibende Aktion aus. Login-only-Seiten sind synthetisch, weil ohne
+Zugangsdaten keine echte Anmeldung erfolgt. `path` wird ohne Querystring
+verglichen, `query_contains` unterscheidet die Flow-Varianten.
 
 ```ux-routes
-[{"method":"POST","path":"/login","response":"tests/fixtures/ux/login_erfolg.html","status":200,"content_type":"text/html; charset=utf-8"},
- {"method":"GET","path":"/kurse","query_contains":"volleyball","response":"tests/fixtures/ux/kurse.html","status":200,"content_type":"text/html; charset=utf-8"},
- {"method":"GET","path":"/kurse/32304","response":"tests/fixtures/ux/kurs_32304.html","status":200,"content_type":"text/html; charset=utf-8"}]
+[{"method":"GET","path":"/qisserver/pages/cs/sys/portal/hisinoneStartPage.faces","response":"tests/fixtures/ux/startseite.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"POST","path":"/qisserver/rds","query_contains":"category=auth.login","response":"tests/fixtures/ux/login_erfolg.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/qisserver/pages/startFlow.xhtml","query_contains":"searchCourseNonStaff-flow","response":"tests/fixtures/ux/suchmaske.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"POST","path":"/qisserver/pages/startFlow.xhtml","query_contains":"searchCourseNonStaff-flow","response":"tests/fixtures/ux/suche_oberseminar.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/qisserver/pages/startFlow.xhtml","query_contains":"detailView-flow","response":"tests/fixtures/ux/veranstaltung_7586.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/qisserver/pages/cm/exa/timetable/myTimetable.xhtml","query_contains":"showMyTimetable-flow","response":"tests/fixtures/ux/stundenplan.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/qisserver/pages/cm/exa/exam/myGrades.xhtml","query_contains":"showMyGrades-flow","response":"tests/fixtures/ux/noten.html","status":200,"content_type":"text/html; charset=utf-8"}]
 ```
 
-## Formularschritte der schreibenden Aktion
+## Keine schreibende Aktion
 
-Die Liste enthält ALLE Requests in Reihenfolge, bis die Buchung endgültig bestätigt ist. `sends` nennt Feldnamen, die im Body vorkommen müssen; ein `*` am Ende erlaubt Präfix-Treffer. `before_confirm: true` ist nur für Schritte erlaubt, die vor der `[j/N]`-Frage laufen und nichts verbindlich auslösen, zum Beispiel das Öffnen des Formulars. `live: erkundet` heißt lesend auf der echten Seite gesehen, `live: synthetisch` heißt nachgebaut und als solches markiert.
-
-```ux-formsteps
-[{"id":"formular_oeffnen","method":"POST","path":"/buchen/32304","sends":["kurs_id"],"response":"tests/fixtures/ux/buchen_formular.html","before_confirm":true,"live":"erkundet"},
- {"id":"teilnehmerdaten","method":"POST","path":"/buchen/32304","sends":["vorname","nachname","email","statusgruppe"],"response":"tests/fixtures/ux/buchen_uebersicht.html","live":"synthetisch"},
- {"id":"verbindlich","method":"POST","path":"/buchen/32304","sends":["bestaetigungstoken"],"response":"tests/fixtures/ux/buchen_bestaetigt.html","final":true,"live":"synthetisch"}]
-```
-
-Der letzte Schritt trägt `"final": true`. Fehlt ein Schritt oder endet die Aktion nach dem ersten Request, meldet `ux_check.py` UX08 und `ux_session.py` bricht den Lauf ab. Beide Gates müssen grün sein, bevor der Build als fertig gilt.
+`hisinone` bietet bewusst keine Prüfungsanmeldung, keine Belegung und keine
+anderen schreibenden Web-Aktionen. Deshalb gibt es keinen `ux-formsteps`-Block
+und keine `[j/N]`-Bestätigung. `login` und `logout` verändern nur die lokale
+Sitzungsdatei.
