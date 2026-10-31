@@ -1,9 +1,9 @@
 # hisinone-cli
 
 HISinOne-Campusportale im Terminal: öffentliches Vorlesungsverzeichnis ohne
-Login, Stundenplan und Leistungsübersicht mit Login. Das Tool ist für viele
-Hochschulen gedacht, die HISinOne einsetzen; erkundet und getestet wurde die
-Instanz der Universität Freiburg.
+Login, Stundenplan und Leistungsübersicht mit Login. Erkundet und getestet wurde
+die Instanz der Universität Freiburg; über `HISINONE_BASE_URL` lässt sich jede
+andere HISinOne-Instanz ansprechen.
 
 ## Schnellstart
 
@@ -18,49 +18,87 @@ hisinone noten
 
 `hisinone login` fragt nach Portal-Adresse oder Hochschulname, Benutzer und
 Passwort. Das Passwort wird verdeckt eingegeben und nicht gespeichert; die
-Sitzung liegt in `~/.config/hisinone-cli/` mit Rechten 0600. Danach genügen
-`hisinone whoami` und `hisinone logout` ohne Passwort. Die Portal-Adresse lässt
-sich mit `HISINONE_BASE_URL` überschreiben, die Zugangsdaten mit
-`HISINONE_USER` und `HISINONE_PASSWORD` (für Agenten).
+Sitzung liegt in `~/.config/hisinone-cli/` mit Rechten 0600. Ist
+`HISINONE_BASE_URL` gesetzt, entfällt die Portal-Frage.
 
-Suche und Veranstaltungsdetails sind öffentlich und brauchen keinen Login.
-`hisinone suche` nimmt den Suchbegriff positional, `hisinone veranstaltung`
-den Namen. Bei mehreren Treffern fragt das Tool im Terminal nummeriert nach.
-Ausgaben sind im Terminal lesbar; mit `--json` oder wenn stdout kein Terminal
-ist, kommt JSON.
+## Befehle
 
-## Schritt 0: UX-Spec zuerst
+### Suchen und Details (öffentlich)
 
-Der komplette Ablauf steht in
-[agent-learnings/WORKFLOW.md](https://github.com/smlfg/agent-learnings/blob/main/WORKFLOW.md).
+```bash
+hisinone suche Oberseminar
+hisinone suche "Algorithmen und Datenstrukturen"
+hisinone veranstaltung "Oberseminar am Lehrstuhl Mustererkennung und Bildverarbeitung"
+```
 
-1. Vor jeder Codezeile `docs/UX.md` ausfüllen: die wichtigsten
-   Nutzer-Aufgaben als abtippbare Terminal-Sitzungen, dazu alle live
-   erkundeten Routen und Fixtures unter `tests/fixtures/ux/`.
-2. Spec prüfen: `python3 tests/harness/ux_spec.py docs/UX.md`
-3. Gate nach dem Bau (beide müssen grün sein, sonst ist der Build nicht fertig):
-   - `python3 tests/harness/ux_check.py .` (UX-Lint UX01–UX09)
-   - `python3 tests/harness/ux_session.py .` (spielt die Sitzungen im
-     Pseudo-Terminal gegen einen Fake-Server durch)
+`suche` nimmt den Suchbegriff positional und durchsucht Titel, Nummer und
+Lehrperson. Die Treffer sind nummeriert und nennen die Unit-ID.
+`veranstaltung` nimmt den Namen positional. Bei mehreren Treffern fragt das
+Tool im Terminal nummeriert nach; ohne Terminal erscheint die Liste mit
+Exit-Code 2.
 
-`tests/harness/` wird unverändert aus agent-learnings übernommen.
+### Stundenplan und Leistungen (Login)
 
-## Pflichtregel: Bedienbarkeit für Menschen
+```bash
+hisinone stundenplan
+hisinone stundenplan --woche
+hisinone noten
+```
 
-Jede CLI muss für Menschen bedienbar sein: `login`-Kommando statt nur Env,
-Namen statt IDs, interaktive Bestätigung im TTY, `--confirm` nur für Agenten,
-README-Schnellstart.
+`stundenplan --woche` zeigt die aktuelle Kalenderwoche, ohne Flag den heutigen
+Tag. Ohne Sitzung nennen die Befehle den nächsten Schritt: `hisinone login`.
 
-- `login` fragt im Terminal interaktiv (Passwort per getpass) und speichert
-  im Schlüsselbund oder in einer Config-Datei mit 0600; dazu `logout` und
-  `whoami` ohne Passwort-Ausgabe. Env-Variablen überschreiben die Config.
-- Namen/Freitext positional (`hisinone suche Oberseminar`,
-  `hisinone veranstaltung "…"`); mehrere Treffer → nummerierte Auswahl im TTY,
-  ohne TTY Liste + Exit Usage.
-- Schreibende Aktionen fragen im TTY „… verbindlich? [j/N]“ (Default Nein);
-  `--confirm`/`--yes` nur für Agenten; ohne TTY und ohne Flag kein Request.
-  `hisinone` hat derzeit keine schreibende Web-Aktion.
-- Terminal-Ausgabe lesbar; JSON mit `--json` oder wenn stdout kein Terminal ist.
-- Fehler nennen den nächsten Schritt, keine Tracebacks bei EOF/Strg+C/fehlender
-  optionaler Abhängigkeit.
-- README beginnt mit „Schnellstart“: `pipx install …`, Login, typische Befehle.
+### Sitzung
+
+```bash
+hisinone whoami
+hisinone logout
+```
+
+`whoami` zeigt Portal und angemeldete Person ohne Passwort. `logout` löscht die
+lokale Sitzungsdatei und ist idempotent.
+
+## Konfiguration
+
+| Variable | Bedeutung |
+|---|---|
+| `HISINONE_BASE_URL` | Portal-Basis-URL überschreiben (andere Hochschule, Fake-Server) |
+| `HISINONE_USER` | Benutzername für Agenten/Tests |
+| `HISINONE_PASSWORD` | Passwort für Agenten/Tests, wird nie gespeichert |
+| `HISINONE_HEUTE` | Bezugsdatum `JJJJ-MM-TT` für `stundenplan`, nur für Tests |
+
+Die Sitzung liegt unter `~/.config/hisinone-cli/session.json` (0600). Es werden
+nur Cookies der HISinOne-Anwendung gespeichert, keine Zugangsdaten.
+
+## Ausgabe
+
+Im Terminal erscheinen lesbare Zeilen. Mit `--json` oder wenn stdout kein
+Terminal ist, steht genau ein JSON-Objekt auf stdout; Prompts und Fehler gehen
+nach stderr. Details und Feldnamen stehen in [INTERFACE.md](INTERFACE.md).
+
+## Exit-Codes
+
+| Code | Bedeutung |
+|---|---|
+| 0 | Erfolg |
+| 1 | Allgemeiner Fehler (unerwartete Antwort, Parse-Fehler, kein Treffer) |
+| 2 | Usage-Fehler (fehlendes Argument, mehrdeutige Auswahl ohne TTY) |
+| 3 | Netzwerk- oder Quellfehler |
+| 4 | Login nötig oder Sitzung abgelaufen |
+| 5 | Login fehlgeschlagen (Zugangsdaten, SSO/Shibboleth) |
+
+## Hinweis
+
+`hisinone` ist ein inoffizielles Werkzeug und kein Angebot der Hochschulen.
+Es nutzt keine offizielle API; Änderungen am Portal können die Auswertung
+brechen. Live wurden ausschließlich lesende GET-Requests auf öffentliche
+Seiten gesendet. Das Tool bietet bewusst keine schreibenden Web-Aktionen wie
+Prüfungsanmeldung oder Belegung.
+
+Die Anforderungen stehen in [ANFORDERUNGEN.md](ANFORDERUNGEN.md), die
+Schnittstelle in [INTERFACE.md](INTERFACE.md), die UX-Spezifikation in
+[docs/UX.md](docs/UX.md).
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE).
