@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Veranstaltungen suchen - HISinOne</title>
+</head>
+<body>
+<!-- Aus der Live-Suchmaske gekuerzt. Das Suchfeld ist ein JSF-POST-Formular. -->
+<h1>Veranstaltungen suchen</h1>
+<form id="genericSearchMask" name="genericSearchMask" method="post"
+      action="/qisserver/pages/startFlow.xhtml?_flowId=searchCourseNonStaff-flow&amp;_flowExecutionKey=e1s1">
+  <input type="hidden" name="activePageElementId" value="">
+  <input type="hidden" name="refreshButtonClickedId" value="">
+  <input type="hidden" name="navigationPosition" value="studiesOffered,searchCourses">
+  <input type="hidden" name="authenticity_token" value="synthetisch">
+  <input type="hidden" name="javax.faces.ViewState" value="e1s1">
+
+  <label for="genericSearchMask:search:inputField_0">Suchbegriffe</label>
+  <input id="genericSearchMask:search:inputField_0"
+         name="genericSearchMask:search:inputField_0"
+         type="text" value="" placeholder="z.B. Titel, Nummer, Lehrperson">
+
+  <label for="genericSearchMask:search:termSelect_input">Semester</label>
+  <select id="genericSearchMask:search:termSelect_input"
+          name="genericSearchMask:search:termSelect_input">
+    <option value="eq|2|2026" selected>Wintersemester 2026</option>
+  </select>
+
+  <button type="submit" name="genericSearchMask:buttonsBottom:search" value="Suchen">Suchen</button>
+</form>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>HISinOne</title>
+</head>
+<body>
+<!-- Aus der Live-Startseite gekuerzt; die Login-Formularfelder sind unveraendert. -->
+<h1>HISinOne</h1>
+<form method="post" id="mobileLoginForm" name="mobileLoginForm"
+      action="/qisserver/rds?state=user&amp;type=1&amp;category=auth.login">
+  <input type="hidden" name="userInfo" value="">
+  <input type="hidden" name="ajax-token" id="ajaxTokenMobile" value="00000000-0000-0000-0000-000000000000">
+  <label for="loginName">Benutzer</label>
+  <input id="loginName" name="asdf" type="text" autocomplete="off">
+  <label for="loginPassword">Passwort</label>
+  <input id="loginPassword" name="fdsa" type="password" autocomplete="off">
+  <button type="submit" name="mobileLoginForm_SUBMIT" value="1">Anmelden</button>
+</form>
+</body>
+</html>
