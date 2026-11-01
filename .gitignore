@@ -1,3 +1,14 @@
 scratch/
 __pycache__/
 *.egg-info/
+
+# Local environments, secrets and tool caches
+.venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.coverage
+.ruff_cache/
+build/
+dist/
